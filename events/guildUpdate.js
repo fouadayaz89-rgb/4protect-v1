@@ -1,73 +1,86 @@
-const Discord = require('discord.js')
-const config = require('../config')
-const db = require("quick.db")
-const cl = new db.table("Color")
-const owner = new db.table("Owner")
-const rlog = new db.table("raidlog")
-const punish = new db.table("Punition")
-const agu = new db.table("Guildupdate")
+const Discord = require('discord.js');
+const config = require('../config');
+const db = require("quick.db");
+const cl = new db.table("Color");
+const owner = new db.table("Owner");
+const rlog = new db.table("raidlog");
+const punish = new db.table("Punition");
+const agu = new db.table("Guildupdate");
 
 module.exports = {
     name: 'guildUpdate',
     once: false,
 
     async execute(client, oldGuild, newGuild) {
-
         if (oldGuild === newGuild) return;
-        let guild = newGuild
+        let guild = newGuild;
 
-        let color = cl.fetch(`color_${guild.id}`)
-        if (color == null) color = config.bot.couleur
+        let color = cl.fetch(`color_${guild.id}`);
+        if (!color) color = config.app.color;
 
-        if (agu.get(`guildupdate_${guild.id}`) === true) {
+        if (agu.get(`guildupdate_${guild.id}`) !== true) return;
 
-            const action = await guild.fetchAuditLogs({type: "GUILD_UPDATE"}).then(audits => audits.entries.first())
-            if (!action | !action.executor) return
-            if (action.executor.idd === client.user.id) return
-    
-            let perm = config.bot.buyer == action.executor.id || config.bot.funny == action.executor.id || owner.get(`owners.${action.executor.id}`) === true
-            if (perm) {
-                return
-            } else if (!perm) {
-                if (punish.get(`sanction_${guild.id}`) === "ban") {
-                    guild.members.ban(action.executor.id, { reason: `Anti Guild Update` })
+        const action = await guild.fetchAuditLogs({ type: "GUILD_UPDATE" }).then(a => a.entries.first());
+        if (!action || !action.executor) return;
+        if (action.executor.id === client.user.id) return;
 
-                } else if (punish.get(`sanction_${guild.id}`) === "derank") {
+        let isOwner = false;
 
-                    guild.members.resolve(action.executor).roles.cache.forEach(role => {
-                        if (role.name !== '@everyone') {
-                            guild.members.resolve(action.executor).roles.remove(role).catch(() => false)
-                        }
-                    })
+        if (Array.isArray(config.app.owners) && config.app.owners.includes(action.executor.id)) isOwner = true;
+        if (Array.isArray(config.app.funny) && config.app.funny.includes(action.executor.id)) isOwner = true;
+        if (typeof config.app.funny === 'string' && config.app.funny === action.executor.id) isOwner = true;
+        if (owner.get(`owners.${action.executor.id}`) === true) isOwner = true;
 
-                } else if (punish.get(`sanction_${guild.id}`) === "kick") {
+        if (isOwner) return;
 
-                    guild.members.kick(action.executor.id, { reason: `Anti Guild Update` })
+        const sanction = punish.get(`sanction_${guild.id}`);
+        const member = await guild.members.fetch(action.executor.id).catch(() => null);
+        if (!member) return;
+
+        if (sanction === "ban") {
+            guild.members.ban(action.executor.id, { reason: `Anti Guild Update` }).catch(console.error);
+        } else if (sanction === "derank") {
+            member.roles.cache.forEach(role => {
+                if (role.name !== '@everyone') {
+                    member.roles.remove(role).catch(() => {});
                 }
+            });
+        } else if (sanction === "kick") {
+            guild.members.kick(action.executor.id, { reason: `Anti Guild Update` }).catch(console.error);
+        }
 
-                const embed = new Discord.MessageEmbed()
-                embed.setDescription(`${action.executor} a apporté des \`modifications au serveur\`, **il a été sanctionné**`)
-                embed.setColor(color)
+        const embed = new Discord.MessageEmbed()
+            .setDescription(`${action.executor} a apporté des \`modifications au serveur\`, **il a été sanctionné**`)
+            .setColor(color);
 
-                const channel = client.channels.cache.get(rlog.fetch(`${guild.id}.raidlog`))
-                if (channel) channel.send({ embeds: [embed] }).catch(() => false)
+        const logChannelId = rlog.fetch(`${guild.id}.raidlog`);
+        if (logChannelId) {
+            const logChannel = client.channels.cache.get(logChannelId);
+            if (logChannel) logChannel.send({ embeds: [embed] }).catch(console.error);
+        }
 
-                if (oldGuild.name !== newGuild.name) await newGuild.setName(oldGuild.name).catch(() => false)
-                if (oldGuild.iconURL({ dynamic: true }) !== newGuild.iconURL({ dynamic: true })) await newGuild.setIcon(oldGuild.iconURL({ dynamic: true })).catch(() => false)
-                if (oldGuild.bannerURL() !== newGuild.bannerURL()) await newGuild.setBanner(oldGuild.bannerURL()).catch(() => false)
-                if (oldGuild.position !== newGuild.position) await newGuild.setChannelPositions([{ channel: oldGuild.id, position: oldGuild.position }]).catch(() => false)
-                if (oldGuild.systemChannel !== newGuild.systemChannel) await newGuild.setSystemChannel(oldGuild.systemChannel).catch(() => false)
-                if (oldGuild.systemChannelFlags !== newGuild.systemChannelFlags) await newGuild.setSystemChannelFlags(oldGuild.systemChannelFlags).catch(() => false)
-                if (oldGuild.verificationLevel !== newGuild.verificationLevel) await newGuild.setVerificationLevel(oldGuild.verificationLevel).catch(() => false)
-                if (oldGuild.widget !== newGuild.widget) await newGuild.setWidget(oldGuild.widget).catch(() => false)
-                if (oldGuild.splashURL !== newGuild.splashURL) await newGuild.setSplash(oldGuild.splashURL).catch(() => false)
-                if (oldGuild.rulesChannel !== newGuild.rulesChannel) await newGuild.setRulesChannel(oldGuild.rulesChannel).catch(() => false)
-                if (oldGuild.publicUpdatesChannel !== newGuild.publicUpdatesChannel) await newGuild.setPublicUpdatesChannel(oldGuild.publicUpdatesChannel).catch(() => false)
-                if (oldGuild.defaultMessageNotifications !== newGuild.defaultMessageNotifications) await newGuild.setDefaultMessageNotifications(oldGuild.defaultMessageNotifications).catch(() => false)
-                if (oldGuild.afkChannel !== newGuild.afkChannel) await newGuild.setAFKChannel(oldGuild.afkChannel).catch(() => false)
-                if (oldGuild.region !== newGuild.region) await newGuild.setRegion(oldGuild.region).catch(() => false)
-                if (oldGuild.afkTimeout !== newGuild.afkTimeout) await newGuild.setAFKTimeout(oldGuild.afkTimeout).catch(() => false)
+        try {
+            if (oldGuild.name !== newGuild.name) await newGuild.setName(oldGuild.name);
+            if (oldGuild.iconURL({ dynamic: true }) !== newGuild.iconURL({ dynamic: true })) await newGuild.setIcon(oldGuild.iconURL({ dynamic: true }));
+            if (oldGuild.bannerURL() !== newGuild.bannerURL()) await newGuild.setBanner(oldGuild.bannerURL());
+            if (oldGuild.systemChannel !== newGuild.systemChannel) await newGuild.setSystemChannel(oldGuild.systemChannel);
+            if (oldGuild.systemChannelFlags.bitfield !== newGuild.systemChannelFlags.bitfield) await newGuild.setSystemChannelFlags(oldGuild.systemChannelFlags);
+            if (oldGuild.verificationLevel !== newGuild.verificationLevel) await newGuild.setVerificationLevel(oldGuild.verificationLevel);
+            if (oldGuild.rulesChannel !== newGuild.rulesChannel) await newGuild.setRulesChannel(oldGuild.rulesChannel);
+            if (oldGuild.publicUpdatesChannel !== newGuild.publicUpdatesChannel) await newGuild.setPublicUpdatesChannel(oldGuild.publicUpdatesChannel);
+            if (oldGuild.defaultMessageNotifications !== newGuild.defaultMessageNotifications) await newGuild.setDefaultMessageNotifications(oldGuild.defaultMessageNotifications);
+            if (oldGuild.afkChannel !== newGuild.afkChannel) await newGuild.setAFKChannel(oldGuild.afkChannel);
+            if (oldGuild.afkTimeout !== newGuild.afkTimeout) await newGuild.setAFKTimeout(oldGuild.afkTimeout);
+            if (oldGuild.splashURL() !== newGuild.splashURL()) await newGuild.setSplash(oldGuild.splashURL());
+            if (oldGuild.vanityURLCode !== newGuild.vanityURLCode) {
+                await guild.fetchVanityData().then(data => {
+                    if (data.code !== oldGuild.vanityURLCode) {
+                        // await newGuild.setVanityURL(oldGuild.vanityURLCode);
+                    }
+                }).catch(() => {});
             }
+        } catch (err) {
+            console.error(err);
         }
     }
-}
+};
